@@ -1,0 +1,181 @@
+package com.example.floodmonitor.controller;
+
+import com.example.floodmonitor.model.Location;
+import com.example.floodmonitor.model.Measurement;
+import com.example.floodmonitor.model.Station;
+import com.example.floodmonitor.model.StationStatus;
+import com.example.floodmonitor.model.WarningLevel;
+import com.example.floodmonitor.service.SimulationService;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDateTime;
+import java.util.Collections;
+
+import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(StationController.class)
+public class FloodMonitorCompleteTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private SimulationService simulationService;
+
+    private Station testStation(String id) {
+        return new Station(id, "Teststation", "Donau",
+                new Location(48.2, 16.3), 250.0, 300.0, 400.0, true);
+    }
+
+    // 1. Abruf aller Stationen als JSON
+    @Test
+    public void test1_GetStationsJson() throws Exception {
+        when(simulationService.getfilterStationen(any(), any(), any())) //any(), brauche ich, wenn der Filter nach etwas fragt, damit der Wert egal ist.
+                .thenReturn(Collections.singletonList(testStation("1")));       //es antwortet mit einer singletonListe, das heißt eine Liste mit nur einem Eintrag
+
+        mockMvc.perform(get("/api/v1/stations").accept(MediaType.APPLICATION_JSON))     //hier wird mit der GET api/v1/stations gemockt
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$[0].id").value("1"));
+    }
+
+    // 2. Abruf aller Stationen als XML, genau gleich wie beim ersten Test nur teste ich hier jetzt XML
+    @Test
+    public void test2_GetStationsXml() throws Exception {
+        when(simulationService.getfilterStationen(any(), any(), any()))
+                .thenReturn(Collections.singletonList(testStation("1")));
+
+        mockMvc.perform(get("/api/v1/stations").accept(MediaType.APPLICATION_XML))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_XML))
+                .andExpect(content().string(containsString("<id>1</id>")));
+    }
+
+    // 3. Abruf einer existierenden Station
+    @Test
+    public void test3_GetExistingStation() throws Exception {
+        when(simulationService.getStationById("1")).thenReturn(testStation("1"));       //Wenn das Mocking nach der Station 1 gefragt wird, gibt es die Station 1 zurück
+
+        mockMvc.perform(get("/api/v1/stations/1").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("1"));        //nur das Feld id
+    }
+
+    // 4. Abruf einer unbekannten Station
+    @Test
+    public void test4_GetUnknownStation() throws Exception {
+        when(simulationService.getStationById("999"))
+                .thenThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "Diese Station existiert nicht")); //hier benutze ich thenThrow, da ich eine Exception werfe 
+
+        mockMvc.perform(get("/api/v1/stations/999").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotFound())      
+                //Das ist die Map von meinem GlobalExceptionHandler
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.message").value("Diese Station existiert nicht"))
+                .andExpect(jsonPath("$.path").value("/api/v1/stations/999"));
+    }
+
+    // 5. Abruf des aktuellsten Messwerts
+    @Test
+    public void test5_GetLatestMeasurement() throws Exception {
+        Measurement m = new Measurement("1", LocalDateTime.now(), 318.4, 742.6, 12.7,14.3, 87, StationStatus.ONLINE, WarningLevel.WARNING);
+        when(simulationService.getLatesMeasurement("1")).thenReturn(m);
+
+        mockMvc.perform(get("/api/v1/stations/1/measurements/latest").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.stationId").value("1"));
+    }
+
+    // 6. Filterung nach Zeitraum (from / to)
+    @Test
+    public void test6_GetMeasurementsWithTimeRange() throws Exception {
+        when(simulationService.getMeasurements(eq("1"), any(), any(), any(), eq(50))).thenReturn(Collections.emptyList());      //eq ist sozusagen ein befehl der sagt, das muss genau diesen wert haben, in meinem Fall id und limit 
+
+        mockMvc.perform(get("/api/v1/stations/1/measurements")
+                        .param("from", "2026-05-01T08:00:00") //.param schickt die Query-Parameter mit
+                        .param("to", "2026-05-02T08:00:00")
+                        .param("limit", "50")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+    }
+
+    // 7. Ungültiger Zeitraum: from - to
+    @Test
+    public void test7_InvalidTimeRange() throws Exception {
+        //mein Fehler war am anfang hier, dass ich ein when() hatte, doch es ist nicht nötig, da die IllegalArgumentException schon bei der Validierung geworfen wird.
+        mockMvc.perform(get("/api/v1/stations/1/measurements")
+                        .param("from", "2026-05-02T08:00:00")
+                        .param("to", "2026-05-01T08:00:00")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest());
+    }
+
+    // 8. Warnstufe NORMAL
+    @Test
+    public void test8_WarningLevelNormal() throws Exception {
+        when(simulationService.getfilterStationen(any(), any(), eq(WarningLevel.NORMAL)))       //hier teste ich den Filter Parameter indem ich das WarningLevel mit eq auf Normal setze
+                .thenReturn(Collections.emptyList());
+
+        mockMvc.perform(get("/api/v1/stations").param("warningLevel", "NORMAL")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+    }
+
+    // 9. Warnstufe WARNING
+    @Test
+    public void test9_WarningLevelWarning() throws Exception {
+        when(simulationService.getfilterStationen(any(), any(), eq(WarningLevel.WARNING)))
+                .thenReturn(Collections.emptyList());
+
+        mockMvc.perform(get("/api/v1/stations").param("warningLevel", "WARNING")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+    }
+
+    // 10. Warnstufe CRITICAL
+    @Test
+    public void test10_WarningLevelCritical() throws Exception {
+        when(simulationService.getfilterStationen(any(), any(), eq(WarningLevel.CRITICAL)))
+                .thenReturn(Collections.emptyList());
+
+        mockMvc.perform(get("/api/v1/stations").param("warningLevel", "CRITICAL")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+    }
+
+    // 11. Nicht unterstütztes Format
+    @Test
+    public void test11_UnsupportedFormat() throws Exception {
+        //Hier hatte ich den gleichen Fehler, mit when(). Spring prüft die Formate am Controller und lehnt das PDF direkt ab
+        mockMvc.perform(get("/api/v1/stations").accept(MediaType.APPLICATION_PDF))
+                .andExpect(status().isNotAcceptable());
+    }
+
+    // 12. Maximales Limit
+    @Test
+    public void test12_MaxLimit() throws Exception {
+        when(simulationService.getMeasurements(eq("1"), any(), any(), any(), eq(500)))  //hier teste ich einen Grenzfall, es soll klappen, da im Service der Grenze von 1-500 ist, daher funktioniert 500 noch.
+                .thenReturn(Collections.emptyList());
+
+        mockMvc.perform(get("/api/v1/stations/1/measurements")
+                        .param("limit", "500")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+    }
+
+}

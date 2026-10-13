@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Flood Monitor</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <style>
+        table { 
+            border-collapse: collapse; width: 100%; margin-top: 10px; 
+        }
+        th, td { 
+            border: 1px solid #999; padding: 6px; text-align: left;
+        }
+        th {
+             background-color: #eee; 
+        }
+
+        /* Die 4 Warnfarben für den Tabellenhintergrund */
+        .NORMAL    { 
+        background-color: #ccffcc; 
+        } /* Grün */
+        .WARNING   { 
+        background-color: #ffe0b2; 
+        } /* Orange */
+        .CRITICAL  { 
+        background-color: #ffcccc; 
+        } /* Rot */
+        .UNKNOWN   { 
+        background-color: #dddddd; 
+        } /* Grau */
+
+        /* Statusbox für Lade und Fehlermeldungen*/
+        #statusBox { margin: 10px 0; padding: 8px; border: 1px solid #999; display: none; }
+    </style>
+</head>
+<body>
+
+<h1>Flood Monitor</h1>
+
+<!-- Statusanzeige für Ladezustände oder Fehlermeldungen -->
+<div id="statusBox"></div>
+
+<p>
+    Datenformat:
+    <select id="formatSelect">
+        <option value="application/json">JSON</option>
+        <option value="application/xml">XML</option>
+    </select>
+    <button onclick="ladeStationen()">Stationen laden</button>
+</p>
+
+<h2>Messstationen</h2>
+<table id="stationenTabelle">
+    <thead>
+    <tr>
+        <th>ID</th><th>Name</th><th>Fluss</th><th>Zeitpunkt</th>
+        <th>Wasserstand</th><th>Durchfluss</th><th>Niederschlag</th>
+        <th>Akku in % </th><th>Status</th><th>Warnstufe</th>
+    </tr>
+    </thead>
+    <tbody>
+
+    </tbody>
+</table>
+
+<h2>Aktuellster Messwert</h2>
+<p>
+    Station wählen:
+    <select id="stationSelect"></select>
+    <button onclick="ladeLetztenMesswert()">Messwert laden</button>
+</p>
+<div id="messwertBox">Bitte zuerst eine Station wählen.</div>
+
+<h2>historischer Messwert</h2>
+<p>
+    Von: <input type="datetime-local" id="fromInput">
+    Bis: <input type="datetime-local" id="toInput">
+    Warnstufe:
+    <select id="warnstufeSelect">
+        <option value="">alle</option>
+        <option value="NORMAL">NORMAL</option>
+        <option value="WARNING">WARNING</option>
+        <option value="CRITICAL">CRITICAL</option>
+        <option value="UNKNOWN">UNKNOWN</option>
+    </select>
+    Limit: <input type="number" id="limitInput" value="100" min="1" max="500" style="width: 70px;">
+    <button onclick="ladeVerlauf()">Verlauf laden</button>
+</p>
+<table id="verlaufTabelle">
+    <thead>
+    <tr>
+        <th>Station</th><th>Zeitpunkt</th><th>Wasserstand</th><th>Durchfluss</th>
+        <th>Niederschlag</th><th>Akku in % </th><th>Status</th><th>Warnstufe</th>
+    </tr>
+    </thead>
+    <tbody>
+
+    </tbody>
+</table>
+
+<script>
+    // Basis-URL meiner Spring Boot REST API
+    const API = '/api/v1';
+
+    // 1. STATUS & FEHLER-HILFSFUNKTIONEN
+    function zeigeStatus(text, istFehler = false) {
+        $('#statusBox').show().text(text).css('color', istFehler ? 'red' : 'black');
+    }
+
+    function holeFehlerText(fehler) {
+        if (fehler.responseJSON && fehler.responseJSON.message) {
+            return fehler.responseJSON.message; // Fehlermeldung aus JSON
+        }
+        if (fehler.responseXML) {
+            return $(fehler.responseXML).find('message').text(); // Fehlermeldung aus XML
+        }
+        return 'Unbekannter Fehler (HTTP ' + fehler.status + ')';
+    }
+
+    // Baut eine Tabellenzelle mit der passenden Warnfarbe als CSS-Klasse
+    function warnstufeZelle(stufe) {
+        return '<td class="' + stufe + '">' + stufe + '</td>';
+    }
+
+
+    // Station wird geladen und angezeigt
+    function ladeStationen() {
+        const gewaehltesFormat = $('#formatSelect').val();
+        zeigeStatus('Lade Stationen ...');
+
+        $.ajax({
+            url: API + '/stations',
+            method: 'GET',
+            headers: { 'Accept': gewaehltesFormat },
+            success: function (daten) {
+                let stationen = [];
+
+                if (gewaehltesFormat === 'application/json') {
+                    stationen = daten; // JSON ist bereits ein Array
+                } else {
+            
+                    $(daten).find('item').each(function () {
+                        stationen.push({
+                            id:           $(this).find('id').text(),
+                            name:         $(this).find('name').text(),
+                            river:        $(this).find('river').text(),
+                            timestamp:    $(this).find('timestamp').text(),
+                            waterLevel:   $(this).find('waterLevel').text(),
+                            flowRate:     $(this).find('flowRate').text(),
+                            rainfall:     $(this).find('rainfall').text(),
+                            batteryLevel: $(this).find('batteryLevel').text(),
+                            status:       $(this).find('status').text(),
+                            warningLevel: $(this).find('warningLevel').text()
+                        });
+                    });
+                }
+
+                zeichneStationen(stationen);
+                fuelleStationAuswahl(stationen);
+                zeigeStatus('Daten erfolgreich geladen (' + new Date().toLocaleTimeString() + ')');
+            },
+            error: function (fehler) {
+                zeigeStatus('Fehler: ' + holeFehlerText(fehler), true);
+            }
+        });
+    }
+
+    function zeichneStationen(stationen) {
+        let html = '';
+        stationen.forEach(s => {
+            html += '<tr>'
+                + '<td>' + s.id + '</td>'
+                + '<td>' + s.name + '</td>'
+                + '<td>' + s.river + '</td>'
+                + '<td>' + s.timestamp + '</td>'
+                + '<td>' + s.waterLevel + '</td>'
+                + '<td>' + s.flowRate + '</td>'
+                + '<td>' + s.rainfall + '</td>'
+                + '<td>' + s.batteryLevel + '</td>'
+                + '<td>' + s.status + '</td>'
+                + warnstufeZelle(s.warningLevel)
+                + '</tr>';
+        });
+        $('#stationenTabelle tbody').html(html);
+    }
+
+    function fuelleStationAuswahl(stationen) {
+        const vorherigeWahl = $('#stationSelect').val(); // Auswahl wird gemerken
+        let html = '';
+        stationen.forEach(s => {
+            html += '<option value="' + s.id + '">' + s.id + ' - ' + s.name + '</option>';
+        });
+        $('#stationSelect').html(html);
+        if (vorherigeWahl) {
+            $('#stationSelect').val(vorherigeWahl); // Auswahl wird wiederhergestellt
+        }
+    }
+
+
+    // Der aktuelle Messwert wird geladen
+    function ladeLetztenMesswert() {
+        const stationsId = $('#stationSelect').val();
+        if (!stationsId) {
+            zeigeStatus('Bitte zuerst eine Station wählen.', true);
+            return;
+        }
+
+        const gewaehltesFormat = $('#formatSelect').val();
+        zeigeStatus('Lade Messwert ...');
+
+        $.ajax({
+            url: API + '/stations/' + stationsId + '/measurements/latest',
+            method: 'GET',
+            headers: { 'Accept': gewaehltesFormat },
+            success: function (daten) {
+                let m;
+                if (gewaehltesFormat === 'application/json') {
+                    m = daten;
+                } else {
+                    m = {
+                        stationId:    $(daten).find('stationId').text(),
+                        timestamp:    $(daten).find('timestamp').text(),
+                        waterLevel:   $(daten).find('waterLevel').text(),
+                        flowRate:     $(daten).find('flowRate').text(),
+                        rainfall:     $(daten).find('rainfall').text(),
+                        temperature:  $(daten).find('temperature').text(),
+                        batteryLevel: $(daten).find('batteryLevel').text(),
+                        status:       $(daten).find('status').text(),
+                        warningLevel: $(daten).find('warningLevel').text()
+                    };
+                }
+                zeigeMesswert(m);
+                $('#statusBox').hide();
+            },
+            error: function (fehler) {
+                zeigeStatus('Fehler: ' + holeFehlerText(fehler), true);
+                $('#messwertBox').html('');
+            }
+        });
+    }
+
+    function zeigeMesswert(m) {
+        $('#messwertBox').html(
+            '<table>'
+            + '<tr><th>Station</th><td>' + m.stationId + '</td></tr>'
+            + '<tr><th>Zeitpunkt</th><td>' + m.timestamp + '</td></tr>'
+            + '<tr><th>Wasserstand</th><td>' + m.waterLevel + ' cm</td></tr>'
+            + '<tr><th>Durchfluss</th><td>' + m.flowRate + ' m³/s</td></tr>'
+            + '<tr><th>Niederschlag</th><td>' + m.rainfall + ' mm/h</td></tr>'
+            + '<tr><th>Temperatur</th><td>' + m.temperature + ' °C</td></tr>'
+            + '<tr><th>Akku</th><td>' + m.batteryLevel + ' %</td></tr>'
+            + '<tr><th>Status</th><td>' + m.status + '</td></tr>'
+            + '<tr><th>Warnstufe</th>' + warnstufeZelle(m.warningLevel) + '</tr>'
+            + '</table>'
+        );
+    }
+
+
+    // Die historischen Messwerte laden
+    function ladeVerlauf() {
+        const stationsId = $('#stationSelect').val();
+        if (!stationsId) {
+            zeigeStatus('Bitte zuerst eine Station wählen.', true);
+            return;
+        }
+
+        // URL-Parameter dynamisch zusammenbauen
+        let url = API + '/stations/' + stationsId + '/measurements';
+        const parameter = [];
+
+        if ($('#fromInput').val()) parameter.push('from=' + $('#fromInput').val());
+        if ($('#toInput').val()) parameter.push('to=' + $('#toInput').val());
+        if ($('#warnstufeSelect').val()) parameter.push('warningLevel=' + $('#warnstufeSelect').val());
+        if ($('#limitInput').val()) parameter.push('limit=' + $('#limitInput').val());
+
+        if (parameter.length > 0) {
+            url += '?' + parameter.join('&');
+        }
+
+        const gewaehltesFormat = $('#formatSelect').val();
+        zeigeStatus('Lade Verlauf ...');
+
+        $.ajax({
+            url: url,
+            method: 'GET',
+            headers: { 'Accept': gewaehltesFormat },
+            success: function (daten) {
+                let messungen = [];
+                if (gewaehltesFormat === 'application/json') {
+                    messungen = daten;
+                } else {
+                    $(daten).find('item').each(function () {
+                        messungen.push({
+                            stationId:    $(this).find('stationId').text(),
+                            timestamp:    $(this).find('timestamp').text(),
+                            waterLevel:   $(this).find('waterLevel').text(),
+                            flowRate:     $(this).find('flowRate').text(),
+                            rainfall:     $(this).find('rainfall').text(),
+                            batteryLevel: $(this).find('batteryLevel').text(),
+                            status:       $(this).find('status').text(),
+                            warningLevel: $(this).find('warningLevel').text()
+                        });
+                    });
+                }
+                zeichneVerlauf(messungen);
+                zeigeStatus(messungen.length + ' Messung(en) geladen.');
+            },
+            error: function (fehler) {
+                zeigeStatus('Fehler: ' + holeFehlerText(fehler), true);
+                $('#verlaufTabelle tbody').html('');
+            }
+        });
+    }
+
+    function zeichneVerlauf(messungen) {
+        let html = '';
+        messungen.forEach(m => {
+            html += '<tr>'
+                + '<td>' + m.stationId + '</td>'
+                + '<td>' + m.timestamp + '</td>'
+                + '<td>' + m.waterLevel + '</td>'
+                + '<td>' + m.flowRate + '</td>'
+                + '<td>' + m.rainfall + '</td>'
+                + '<td>' + m.batteryLevel + '</td>'
+                + '<td>' + m.status + '</td>'
+                + warnstufeZelle(m.warningLevel)
+                + '</tr>';
+        });
+
+        if (html === '') {
+            html = '<tr><td colspan="8">Keine Messungen gefunden.</td></tr>';
+        }
+        $('#verlaufTabelle tbody').html(html);
+    }
+
+
+    // Beim Laden der Seite wird es einmal ausgeführt
+    ladeStationen();
+</script>
+
+</body>
+</html>

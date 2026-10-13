@@ -1,78 +1,32 @@
-# Flood Monitor REST API – Starter Project
+# DEZSYS_GK71_FLOODMONITOR_REST
+#### Hochwasser Warnsystem 
+  1) Datenerfassen: Stationen am Fluss messen kontinuierlich Daten, wie den Wasserstand.
+  2) Schnittstelle: REST-API in JSON und XML, für aktuelle und historische Werte, aber auch Warnungen
+  3) Frontend: Eine Webanwendung mit Filtermöglichkeiten nach Station, Zeitraum oder Warnstufe
+#### Ziel
+Das Ziel dieses Projekt war die Entwicklung einer REST basierten Spring Boot Anwendung zur Überwachung von Hochwassermessstationen und Messwerten. Mein Floodmonitor hat verschiedene Endpunkte, um Stationen nach Flüssen oder Warnstufen zu filtern und dann aufzurufen. Bei mir war das größte Problem, dass die Daten von den Endpunkten, im JSON als auch im XML-Format aufgerufen werden.
 
-## Learning Objectives
-
-In this exercise you will learn how to:
-
-1. Set up a basic **Spring Boot** REST application using **Gradle**.
-2. Create a **model class** (POJO) and understand JSON serialization.
-3. Build a **REST controller** and expose a `GET` endpoint.
-4. Test your REST API using a browser or a tool like **Postman** or **curl**.
-
----
-
-## Project Structure
-
+#### Struktur
 ```
-src/main/java/com/example/floodmonitor/
-├── FloodMonitorApplication.java   ← Entry point
-├── model/
-│   └── Station.java               ← Data model (POJO)
-└── controller/
-    └── StationController.java     ← REST controller
+    DEZSYS Floodmonitor/
+├── src/main/java/com/example/floodmonitor/
+│   ├── controller/
+│   │   ├── StationController.java
+│   │ 
+│   ├── model/
+│   │   ├── Location.java
+|   |   ├── Measurement.java
+|   |   ├── Station.java
+|   |   ├── StationStatus.java
+|   |   ├── WarningLevel.java
+│   ├── service/
+|   |   ├──SimulationService.java
+│   ├── exception/
+|   |   ├── GlobalExceptionHandler
+│   ├── repository/
+|   |   ├── FloodMonitorRepository.java
+├── src/resources/static/
+│   └── index.html
+├── src/test/java/com/example/floodmonitor/controller/
+│   └── StationControllerTest.java
 ```
-
----
-
-## Running the Application
-
-### Prerequisites
-- Java 17 or higher
-- No additional installation required (Gradle Wrapper included)
-
-### Start the application
-```bash
-./gradlew bootRun
-```
-
-The server starts on **http://localhost:8080**.
-
-### Test the endpoint
-Open your browser or use curl:
-```bash
-curl http://localhost:8080/api/v1/stations
-```
-
-Expected response (JSON array of stations):
-```json
-[
-  {
-    "id": "1",
-    "stationName": "Station Vienna",
-    "timestamp": "2024-01-15T10:00:00",
-    "waterLevel": 2.35,
-    "waterTemperature": 8.5,
-    "unit": "m"
-  },
-  ...
-]
-```
-
----
-
-## Next Tasks
-
-### Tasks 1
-- [ ] Run the application and verify the `/api/v1/stations` endpoint works.
-- [ ] Add a new field `waterFlow` (double) to the `Station` model. Verify the new field appears in the JSON response.
-- [ ] Add a new endpoint `GET /api/v1/stations/{id}` that returns a single station by its ID.
-
-### Tasks 2
-- [ ] Add a `GET /api/v1/stations/count` endpoint that returns the number of stations as a plain integer.
-- [ ] Return an appropriate HTTP status code (`404 Not Found`) when a station with the given ID does not exist.
-- [ ] Add a `POST /api/v1/stations` endpoint that accepts a JSON body and adds a new station to the (in-memory) list.
-
-### Tasks 3
-- [ ] Add XML support: return XML instead of JSON when the client sends `Accept: application/xml`.
-- [ ] Integrate **Springdoc OpenAPI** (Swagger UI) to document your API.
-
